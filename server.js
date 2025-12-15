@@ -23,20 +23,26 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+     "https://blog-shell-frontend.vercel.app",
+    'https://*.vercel.app',
+    process.env.FRONTEND_URL, // Allow all Vercel preview deployments
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  maxAge: 600 // Cache preflight requests for 10 minutes
+};
 
-app.use(
-  cors({
-    origin: [
-      "https://blog-shell-frontend.vercel.app", // production frontend
-      "http://localhost:5173",                  // local frontend for testing
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    credentials: true, // allow cookies
-  })
-);
+// Apply CORS middleware
+app.use(cors(corsOptions));
 
-// handle prefiglight requests
-app.options("*", cors());
+// Handle preflight requests
+app.options(/.*/, cors(corsOptions));
+
 
 
 // middlewares
