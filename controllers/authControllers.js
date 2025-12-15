@@ -80,8 +80,8 @@ const adminSignup = async (req, res) => {
     };
 
     const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "7d" });
-    const approveUrl = `http://localhost:5000/user/verifyadmin?status=approve&token=${token}`;
-    const rejectUrl = `http://localhost:5000/user/verifyadmin?status=reject&token=${token}`;
+    const approveUrl = `https://blogshell-server.onrender.com/user/verifyadmin?status=approve&token=${token}`;
+    const rejectUrl = `https://blogshell-server.onrender.com/user/verifyadmin?status=reject&token=${token}`;
 
     await sendEmail(
       process.env.ADMIN_MAIL,
