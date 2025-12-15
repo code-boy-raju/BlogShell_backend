@@ -34,9 +34,8 @@ app.use(
     credentials: true, // allow cookies
   })
 );
-// Apply CORS middleware
-app.use(cors(corsOptions));
 
+// handle prefiglight requests
 app.options("*", cors());
 
 
