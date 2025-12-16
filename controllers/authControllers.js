@@ -4,6 +4,7 @@ const { claudynaryUpload } = require("../config/cloudynary.js");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { userModel } = require("../models/authModel.js");
+const {PendingAdmin}=require("../models/pendingModel.js")
 const { sendEmail } = require("../services/emailservice.js");
 require("dotenv").config();
 const fs = require("fs");
@@ -35,6 +36,7 @@ const authorSignup = async (req, res) => {
       email,
       "Registration successful.",
       `<h2>Welcome ${name}!</h2>
+      <p>Welcome to BlogShell</p>
        `
     );
 
@@ -49,37 +51,53 @@ const authorSignup = async (req, res) => {
   }
 };
 
-// ADMIN SIGNUP 
+
+
+
+//Admin Signup
 const adminSignup = async (req, res) => {
   const { name, email, password } = req.body;
-  const uploadfile = await claudynaryUpload(req.file.path);
-  console.log(uploadfile);
 
   try {
-    fs.unlinkSync(req.file.path);
-
-    if (!name || !email || !password || !uploadfile) {
+    //  Basic validation
+    if (!name || !email || !password || !req.file) {
       return res.status(400).json({ message: "All fields required" });
     }
 
-    const check = await userModel.findOne({ email });
-    if (check) {
+    //  Check user already exists
+    const userExists = await userModel.findOne({ email });
+    if (userExists) {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    const hashPass = await bcrypt.hash(password, 10);
-    const pendingAdmin = {
+    //  Check pending request already exists
+    const pendingExists = await PendingAdmin.findOne({ email });
+    if (pendingExists) {
+      return res.status(400).json({ message: "Approval already pending" });
+    }
+
+    //  Upload document
+    const uploadfile = await claudynaryUpload(req.file.path);
+    fs.unlinkSync(req.file.path);
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    //  Save ONLY to PendingAdmin
+    await PendingAdmin.create({
       name,
       email,
-      password: hashPass,
-      role: "admin",
-      adminApplication: {
-        applicationStatus: "pending",
-        docsfile: uploadfile ? uploadfile.secure_url : null
-      },
-    };
+      password: hashedPassword,
+      docsfile: uploadfile.secure_url
+    });
 
-    const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    //  Create approval links (JWT ONLY contains email)
+    const token = jwt.sign(
+      { email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
     const approveUrl = `https://blogshell-server.onrender.com/user/verifyadmin?status=approve&token=${token}`;
     const rejectUrl = `https://blogshell-server.onrender.com/user/verifyadmin?status=reject&token=${token}`;
 
@@ -88,7 +106,7 @@ const adminSignup = async (req, res) => {
       "Admin Approval Request",
       `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 8px;">
         <h2 style="color: #191818ff; text-align: center;">Approve or Reject Admin for BlogShell</h2>
-        <p><strong>${name}</strong> has applied to become an instructor.</p>
+        <p><strong>${name}</strong> has applied to become an Admin.</p>
         <p><strong>Email:</strong> ${email}<br/><strong>Password:</strong> ${password}</p>
         <p><a href="${uploadfile.secure_url}" style="color: #11bff4ff;" target="_blank">📎 View Identity Document</a></p>
         <div style="margin-top: 30px; text-align: center;">
@@ -99,67 +117,66 @@ const adminSignup = async (req, res) => {
       </div>`
     );
 
-    await userModel.create(pendingAdmin);
     res.status(200).json({
-      message: " Email approval sent to superadmin. In case of approval, you will get a success email."
+      message: "Admin approval request sent"
     });
 
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: " Something went wrong in signupDetails", error: error });
+    console.error(error);
+    res.status(500).json({ message: "Signup failed" });
   }
 };
 
-//  VERIFY ADMIN APPROVAL 
+
+//VERIFY ADMIN
 const verifyAdmin = async (req, res) => {
   const { status, token } = req.query;
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const email = decoded.email;
-
-    if (!email) return res.status(400).send(" Invalid token");
-
+    const { email } = decoded;
+    const admin = await PendingAdmin.findOne({ email });
+    if (!admin) {
+      return res.send("No pending admin request found");
+    }
+// if approved
     if (status === "approve") {
-      await userModel.findOneAndUpdate(
-        { email },
-        { "adminApplication.applicationStatus": "approved" },
-        { new: true }
-      );
-
-      await sendEmail(
+      await userModel.create({
+        name: admin.name,
+        email: admin.email,
+        password:admin.password,
+        role: "admin",
+         adminApplication: {
+        applicationStatus: "approved",
+        docsfile: admin.docsfile
+      }
+      });
+      await PendingAdmin.deleteOne({ email });
+          await sendEmail(
         email,
         "Admin Approval Accepted",
         `<h2> Your Admin account has been approved for BlogShell!</h2>
          <p>You can now log in to your Admin dashboard.</p>`
       );
-
-      return res.send(`<h2> Admin approved successfully!</h2>
-                       <p>An email has been sent to the admin notifying them.</p>`);
+      return res.send("Admin approved successfully");
     }
 
+    //If rejected
     if (status === "reject") {
-      const user = await userModel.findOne({ email });
-      if (user) {
-        await userModel.findOneAndDelete({ email });
+      await PendingAdmin.deleteOne({ email });
 
-        await sendEmail(
+await sendEmail(
           email,
           "Admin Approval Rejected",
           `<h2> Sorry, your Admin application has been rejected.</h2>
            <p>You may reapply later.</p>`
         );
-      }
-
-      return res.send(`<h2 Admin rejected successfully!</h2>
-                       <p>An email has been sent to the applicant.</p>`);
+      return res.send("Admin rejected successfully");
     }
-
-    return res.status(400).send(" Invalid status. Use approve or reject.");
-
+    return res.status(400).send("Invalid status");
   } catch (error) {
-    console.log(error);
-    return res.status(400).send(" Invalid or expired token");
+    console.error(error);
+    res.status(400).send("Invalid or expired token");
   }
 };
 
@@ -200,7 +217,7 @@ const login = async (req, res) => {
   }
 };
 
-module.exports = { login };
+
 
 // FORGOT PASSWORD (JWT BASED)
 const forgotPassword = async (req, res) => {
